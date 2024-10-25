@@ -323,12 +323,13 @@ class EnhancedCityPopGenerator {
     const style = this.options.style || 'uptempo';
     const settings = this.styleSettings[style];
     
-    // Generate tempo within style-specific range
-    const tempo = settings.tempoRange[0] + 
-      Math.random() * (settings.tempoRange[1] - settings.tempoRange[0]);
+    // Generate tempo with safety bounds
+    const tempo = Math.max(60, Math.min(180,
+      settings.tempoRange[0] + 
+      Math.random() * (settings.tempoRange[1] - settings.tempoRange[0])
+    ));
     midi.header.setTempo(tempo);
     
-    // Select progression template based on style
     const validTemplates = this.progressionTemplates.filter(t => 
       t.style === style || t.style === 'standard'
     );
@@ -346,58 +347,110 @@ class EnhancedCityPopGenerator {
       const rootIndex = i % progression.roots.length;
       const root = 60 + progression.roots[rootIndex];
       
-      // Enhanced voicing selection
       const voicingKeys = Object.keys(this.voicings).filter(key => {
         const v = this.voicings[key];
         return (!this.options.era || v.era === this.options.era) &&
                (!this.options.artistInfluence || v.artistStyle === this.options.artistInfluence);
       });
       
+      // Ensure we have valid voicings
+      if (voicingKeys.length === 0) {
+        voicingKeys.push('maj9'); // fallback to basic voicing
+      }
+      
       const selectedVoicing = this.voicings[
         voicingKeys[Math.floor(Math.random() * voicingKeys.length)]
       ];
       
-      const complexity = tensionArc[i] * (progression.complexity || 1);
-      const notes = this.createRichVoicing(root, selectedVoicing, complexity, i);
+      const complexity = Math.max(0, Math.min(1, 
+        tensionArc[i] * (progression.complexity || 1)
+      ));
       
-      // Enhanced voice leading
+      let notes = this.createRichVoicing(root, selectedVoicing, complexity, i);
+      
+      // Ensure notes are within valid MIDI range (0-127)
+      notes = notes.filter(note => note >= 0 && note <= 127);
+      
+      // Skip if no valid notes
+      if (notes.length === 0) continue;
+      
+      // Enhanced voice leading with safety checks
       if (prevNotes.length > 0) {
-        notes.forEach((note, idx) => {
+        notes = notes.map((note, idx) => {
           const closest = prevNotes.reduce((prev, curr) => {
             return Math.abs(curr - note) < Math.abs(prev - note) ? curr : prev;
           });
           if (Math.abs(closest - note) > 7) {
-            notes[idx] = note + (closest > note ? 12 : -12);
+            const adjustedNote = note + (closest > note ? 12 : -12);
+            // Ensure adjusted note is within valid MIDI range
+            return adjustedNote >= 0 && adjustedNote <= 127 ? adjustedNote : note;
           }
+          return note;
         });
       }
 
-      // Add notes with style-specific humanization
-      const chordStart = this.applySwing(time);
+      // Add notes with safety checks
+      const chordStart = Math.max(0, time + Math.max(-0.01, Math.min(0.01, 
+        (Math.random() - 0.5) * 0.02
+      )));
+      
       notes.forEach(note => {
-        const velocity = settings.velocityRange[0] + 
-          Math.random() * (settings.velocityRange[1] - settings.velocityRange[0]);
+        // Ensure velocity is within valid range
+        const velocity = Math.max(0, Math.min(1,
+          (settings.velocityRange[0] + 
+          Math.random() * (settings.velocityRange[1] - settings.velocityRange[0])) / 127
+        ));
         
-        const noteTime = chordStart + (Math.random() - 0.5) * 0.01;
-        const duration = 1.95 + (Math.random() - 0.5) * 0.1;
+        // Ensure timing is valid
+        const noteTime = Math.max(0, chordStart + Math.max(-0.005, Math.min(0.005,
+          (Math.random() - 0.5) * 0.01
+        )));
         
-        track.addNote({
-          midi: Math.max(0, Math.min(127, note)),
-          time: noteTime,
-          duration: duration,
-          velocity: velocity / 127
-        });
+        // Ensure duration is valid
+        const duration = Math.max(0.1, Math.min(4,
+          1.95 + (Math.random() - 0.5) * 0.1
+        ));
+        
+        try {
+          track.addNote({
+            midi: Math.floor(Math.max(0, Math.min(127, note))),
+            time: noteTime,
+            duration: duration,
+            velocity: velocity
+          });
+        } catch (error) {
+          console.warn('Skipped invalid note:', { note, time: noteTime, duration, velocity });
+        }
       });
 
-      time += 2;
+      time = Math.max(0, time + 2);
       prevNotes = notes;
     }
 
-    return {
-      data: midi.toArray(),
-      tempo,
-      name: `citypop-${this.options.era || 'standard'}-${this.options.style || 'uptempo'}-${Date.now()}`
-    };
+    try {
+      return {
+        data: midi.toArray(),
+        tempo,
+        name: `citypop-${this.options.era || 'standard'}-${this.options.style || 'uptempo'}-${Date.now()}`
+      };
+    } catch (error) {
+      console.error('Error creating MIDI data:', error);
+      // Provide fallback minimal valid MIDI
+      const fallbackMidi = new Midi();
+      const fallbackTrack = fallbackMidi.addTrack();
+      fallbackTrack.addNote({
+        midi: 60,
+        time: 0,
+        duration: 1,
+        velocity: 0.8
+      });
+      
+      return {
+        data: fallbackMidi.toArray(),
+        tempo: 120,
+        name: `citypop-fallback-${Date.now()}`
+      };
+    }
   }
 
   private generateTensionArc(length: number): number[] {
@@ -500,17 +553,28 @@ export const generateAndDownloadMidi = (options: {
   artistInfluence?: string;
   complexity?: number;
 } = {}): { url: string; filename: string } => {
-  try {
-    const generator = new EnhancedCityPopGenerator(options);
-    const { data, tempo, name } = generator.generateMidiFile();
-    
-    const blob = new Blob([data], { type: 'audio/midi' });
-    const url = URL.createObjectURL(blob);
-    const filename = `${name}-${Math.round(tempo)}bpm.mid`;
-    
-    return { url, filename };
-  } catch (error) {
-    console.error('Error generating MIDI:', error);
-    throw new Error('Failed to generate MIDI file');
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (attempts < maxAttempts) {
+    try {
+      const generator = new EnhancedCityPopGenerator(options);
+      const { data, tempo, name } = generator.generateMidiFile();
+      
+      const blob = new Blob([data], { type: 'audio/midi' });
+      const url = URL.createObjectURL(blob);
+      const filename = `${name}-${Math.round(tempo)}bpm.mid`;
+      
+      return { url, filename };
+    } catch (error) {
+      attempts++;
+      console.warn(`MIDI generation attempt ${attempts} failed:`, error);
+      
+      if (attempts >= maxAttempts) {
+        throw new Error('Failed to generate valid MIDI file after multiple attempts');
+      }
+    }
   }
+
+  throw new Error('Failed to generate MIDI file');
 };
