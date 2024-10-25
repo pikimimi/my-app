@@ -240,16 +240,12 @@ class EnhancedCityPopGenerator {
     return time + (Math.random() * swingFactor - swingFactor / 2);
   }
 
-  private checkNoteInScale(
-    note: number,
-    root: number,
-    scaleType: keyof typeof this.scaleTypes = 'major'
-  ): ScaleNote {
+  private checkNoteInScale(note: number, root: number, scaleType: 'major' | 'minor' | 'dorian' | 'mixolydian' = 'major'): ScaleNote {
     const normalizedNote = ((note - root) % 12 + 12) % 12;
     return {
       inKey: this.scaleTypes[scaleType].includes(normalizedNote),
-      isTension: [9, 11, 13].includes(normalizedNote),
-      isAlteration: [1, 3, 6, 8, 10].includes(normalizedNote)
+      isTension: [9, 11, 13].includes(normalizedNote), // 9ths, 11ths, 13ths
+      isAlteration: [1, 3, 6, 8, 10].includes(normalizedNote) // b9, #9, b13, etc.
     };
   }
 
@@ -265,20 +261,20 @@ class EnhancedCityPopGenerator {
 
     // Reduce velocity for out-of-key notes
     if (!scaleInfo.inKey) {
-      velocityMultiplier *= 0.6;
+      velocityMultiplier *= 0.6; // 40% reduction for out-of-key notes
     }
 
     // Further adjust based on note role
     if (scaleInfo.isTension) {
-      velocityMultiplier *= 0.8;
+      velocityMultiplier *= 0.8; // Subtle reduction for tensions
     }
     if (scaleInfo.isAlteration) {
-      velocityMultiplier *= 0.7;
+      velocityMultiplier *= 0.7; // More reduction for alterations
     }
 
     // Chord tone emphasis
     if (isChordTone) {
-      velocityMultiplier *= 1.2;
+      velocityMultiplier *= 1.2; // Boost chord tones
     }
 
     // Position-based dynamics
@@ -286,23 +282,23 @@ class EnhancedCityPopGenerator {
     velocityMultiplier *= positionFactor;
 
     // Range-based adjustments
-    const normalizedNote = ((note - 60) / 24);
+    const normalizedNote = ((note - 60) / 24); // Normalize around middle C
     const rangeFactor = 1 - (Math.abs(normalizedNote) * 0.1);
     velocityMultiplier *= rangeFactor;
 
     // Apply style-specific adjustments
     switch (this.options.style) {
       case 'ballad':
-        velocityMultiplier *= 0.9;
+        velocityMultiplier *= 0.9; // Generally softer
         break;
       case 'fusion':
-        velocityMultiplier *= 1.1;
+        velocityMultiplier *= 1.1; // More dynamic
         break;
     }
 
     // Era-specific adjustments
     if (this.options.era === 'mid80s') {
-      velocityMultiplier *= 1.1;
+      velocityMultiplier *= 1.1; // More pronounced dynamics in mid-80s
     }
 
     // Apply final randomization
