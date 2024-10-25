@@ -17,6 +17,13 @@ interface ProgressionTemplate {
   complexity: number;
 }
 
+// Add this interface definition near the top of the file, after the existing interfaces
+interface ScaleNote {
+  inKey: boolean;      // Whether the note is in the current scale
+  isTension: boolean;  // Whether the note is a tension note (9, 11, 13)
+  isAlteration: boolean; // Whether the note is an alteration (b9, #9, b13)
+}
+
 class EnhancedCityPopGenerator {
   private readonly voicings: Record<string, ExtendedVoicing> = {
     // Classic City Pop voicings
@@ -128,6 +135,13 @@ class EnhancedCityPopGenerator {
     }
   };
 
+  private readonly scaleTypes = {
+    major: [0, 2, 4, 5, 7, 9, 11],
+    minor: [0, 2, 3, 5, 7, 8, 10],
+    dorian: [0, 2, 3, 5, 7, 9, 10],
+    mixolydian: [0, 2, 4, 5, 7, 9, 10]
+  };
+
   constructor(
     private readonly options: {
       era?: '70s' | 'early80s' | 'mid80s' | 'late80s';
@@ -224,6 +238,81 @@ class EnhancedCityPopGenerator {
     const style = this.options.style || 'uptempo';
     const swingFactor = this.styleSettings[style].swingFactor;
     return time + (Math.random() * swingFactor - swingFactor / 2);
+  }
+
+  private checkNoteInScale(
+    note: number,
+    root: number,
+    scaleType: keyof typeof this.scaleTypes = 'major'
+  ): ScaleNote {
+    const normalizedNote = ((note - root) % 12 + 12) % 12;
+    return {
+      inKey: this.scaleTypes[scaleType].includes(normalizedNote),
+      isTension: [9, 11, 13].includes(normalizedNote),
+      isAlteration: [1, 3, 6, 8, 10].includes(normalizedNote)
+    };
+  }
+
+  private calculateNoteVelocity(
+    note: number,
+    root: number,
+    baseVelocity: number,
+    position: number,
+    isChordTone: boolean
+  ): number {
+    const scaleInfo = this.checkNoteInScale(note, root);
+    let velocityMultiplier = 1.0;
+
+    // Reduce velocity for out-of-key notes
+    if (!scaleInfo.inKey) {
+      velocityMultiplier *= 0.6;
+    }
+
+    // Further adjust based on note role
+    if (scaleInfo.isTension) {
+      velocityMultiplier *= 0.8;
+    }
+    if (scaleInfo.isAlteration) {
+      velocityMultiplier *= 0.7;
+    }
+
+    // Chord tone emphasis
+    if (isChordTone) {
+      velocityMultiplier *= 1.2;
+    }
+
+    // Position-based dynamics
+    const positionFactor = 1 + (Math.sin(position * Math.PI / 4) * 0.1);
+    velocityMultiplier *= positionFactor;
+
+    // Range-based adjustments
+    const normalizedNote = ((note - 60) / 24);
+    const rangeFactor = 1 - (Math.abs(normalizedNote) * 0.1);
+    velocityMultiplier *= rangeFactor;
+
+    // Apply style-specific adjustments
+    switch (this.options.style) {
+      case 'ballad':
+        velocityMultiplier *= 0.9;
+        break;
+      case 'fusion':
+        velocityMultiplier *= 1.1;
+        break;
+    }
+
+    // Era-specific adjustments
+    if (this.options.era === 'mid80s') {
+      velocityMultiplier *= 1.1;
+    }
+
+    // Apply final randomization
+    const randomFactor = 1 + (Math.random() * 0.1 - 0.05);
+    velocityMultiplier *= randomFactor;
+
+    // Calculate final velocity
+    return Math.min(127, Math.max(1, 
+      Math.round(baseVelocity * velocityMultiplier)
+    ));
   }
 
   public generateMidiFile(): { data: Uint8Array; tempo: number; name: string } {
